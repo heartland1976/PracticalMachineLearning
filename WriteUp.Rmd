@@ -13,6 +13,8 @@ In this project, your goal will be to use data from accelerometers on the belt, 
 
 The goal of the project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. 
 
+I'd like to kindly thank the people at http://groupware.les.inf.puc-rio.br/har for allowing us to make use of their data.
+
 ## Synopsis
 
 
