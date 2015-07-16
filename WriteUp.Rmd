@@ -7,32 +7,215 @@ output: html_document
 
 ## Introduction
 
-Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement ??? a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement  a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
 
-In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+In this project, data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants will be used. These participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
 
-The goal of the project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. 
+The goal of the project is to predict the manner in which they did the exercise. 
 
 I'd like to kindly thank the people at http://groupware.les.inf.puc-rio.br/har for allowing us to make use of their data.
 
 ## Synopsis
 
+The data-set provided for training the model contained several issues. The most important one was the number of columns to use for the model. Since my expectation was that the relationship to many of these would be very tight, but at the same time would decrease the performance of the machine learning phase, I decided to drop most of the seemingly related columns and keep just the rest.
+
+With this in mind, several prediction models have been tested, of which some are included in this report. Confusion matrices have been printed to validate the accuracy and out of sample errors. As it turns out the Random Forest Model delivered a 99% accuracy using either the independent randomForest package, or using the integration with caret: 
+
+* Random Forest - randomForest package: execution time several seconds, accuracy 99%
+* Random Forest - caret package: execution time close to 15 minutes, accuracy 99%
+* Decision tree - caret package: several seconds, accuracy very low
+* Boosted trees - caret package: approximately 5 minutes, accuracy 93%
+
+As it turns out the above randomForest model has resulted in a 100% score for the submission part of this Data Science module.
 
 ## Preparation
 
-In this section we download the data, load the downloaded files, and print a summary.
+Here we load some required libraries:
 
 ```{r}
+# install.packages("caret", dependencies=TRUE, quiet = TRUE)
+library(caret)
+```
 
-trainingFile <- download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 'pml-training.csv', method="curl");
+```{r}
+library(ggplot2)
+```
 
-trainSet <- read.csv("pml-training.csv");
+```{r}
+library(randomForest)
+```
 
-head(trainSet);
+```{r}
+library(rpart)
+```
 
-testingFile <- download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', 'pml-testing.csv', method="curl");
+## Getting Data
 
-testSet <- read.csv("pml-testing.csv");
+In this section we download the data, load the downloaded files into memory.
 
-head(testSet);
+```{r}
+trainingFile <- download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv', 'pml-training.csv', method="curl")
+
+trainSet <- read.csv("pml-training.csv")
+
+testingFile <- download.file('https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv', 'pml-testing.csv', method="curl")
+
+testSet <- read.csv("pml-testing.csv")
+```
+
+## Exploratory Data Analysis
+
+Here's an excerpt of the two data-sets, trainSet and headSet:
+
+```{r}
+head(trainSet[grep("^yaw|^roll|^pitch|^picth|^classe", names(trainSet))],2);
+```
+
+```{r}
+head(trainSet[grep("^yaw|^roll|^pitch|^picth|^classe", names(testSet))],2);
+```
+
+```{r}
+summary(trainSet$classe)
+
+nrow(trainSet)
+
+nrow(testSet)
+```
+
+Some brief feature plots to analyse a part of the data are as follows. There are clear relationships visible between the different sensors, as well as spurious patterns.
+
+```{r}
+featurePlot(x=trainSet[,grep("^yaw", names(trainSet))], trainSet$classe, plot="pairs")
+```
+
+```{r}
+featurePlot(x=trainSet[,grep("^roll", names(trainSet))], trainSet$classe, plot="pairs")
+```
+
+```{r}
+featurePlot(x=trainSet[,grep("^pitch|^picth", names(trainSet))], trainSet$classe, plot="pairs")
+```
+
+The following can be noted about the data through the file and documentation:
+
+* The classe variable in the data-set is describing the way the exercise was performed. There are five different values, each describing one way the exercise was performed, whereby class A is the correct way, the others are describing commonly made mistakes.
+* There are a lot of similar column names in the file, and they might be highly correlated, and not all needed. It might be useful to apply Principle Component Analysis.
+* The data contains a lot of columns, many of them having near zero or NA values. We might want to remove, ignore or impute them.
+* Note the wondrous misspelling of "pitch" versus "picth" in the column names.
+* We need to convert the factor variable "classe", and make sure other columns are numeric.
+* The classe variable is not present in the test-set. This makes sense, it's what we have to predict.
+
+## Cleaning Data
+
+Before we engage in the Machine Learning phase we need to clean up the data. This will be according to some of the above comments made in the Exploratory Data Analysis section. 
+
+An important note is that I decided to be very rough in the cleansing, and will just keep the yaw, roll, pitch columns for the various sensors, and drop the rest. The classe column will also be included. 
+
+```{r}
+# Filter out just the yaw, roll, pi[ct]h and classe columns, drop the rest
+cleanedTrainSet <- trainSet[grep("^yaw|^roll|^pitch|^picth|^classe", names(trainSet))]
+
+# Convert the classe column to a factor.
+cleanedTrainSet$classe <- as.factor(cleanedTrainSet$classe)
+
+# Number of rows in the cleaned training set
+nrow(cleanedTrainSet)
+
+# Validating if there are no empty rows / columns in the resulting set:
+sum(complete.cases(cleanedTrainSet))
+```
+
+## Machine Learning Using Random Forest
+
+In this first machine learning exercise, we will be using randomForest modeling. The accuracy of this model is supposed to be high. As it turns out, the speed turned out to be fairly okay, just a couple of seconds to generate against the training-set. However, if I run the randomForest generation as a parameter to caret's train package, it takes an awfully long time.
+
+```{r}
+inTrain <- createDataPartition(y=cleanedTrainSet$classe, p=0.8, list=FALSE)
+
+training <- cleanedTrainSet[inTrain,]
+testing <- cleanedTrainSet[-inTrain,]
+
+# Create a random forest model
+randomForestModel <- randomForest(classe ~ . , data=training)
+
+# Cross-validate the predictions against the test-set
+predictions <- predict(randomForestModel, newdata=testing)
+```
+
+And last, let's plot a confusionMatrix to show how well we did:
+
+```{r}
+confusionMatrix(predictions, testing$classe)
+```
+
+The confusion matrix shows a very high accuracy of close to 99%, which is very good! Sensitivity (missed positives) show that incorrectly categorization of the test class is very low. Specificity is showing the same; the likelihood of incorrect categorization of *not* being the test class is very low (negatives called positives). So I think we found a good model. 
+
+## Machine Learning Using a Decision Tree
+
+As a fun exercise, another attempt at learning the model can be done using a tree model. The below shows how this is done using caret.
+
+```{r}
+inTrain <- createDataPartition(y=cleanedTrainSet$classe, p=0.8, list=FALSE)
+
+training <- cleanedTrainSet[inTrain,]
+testing <- cleanedTrainSet[-inTrain,]
+
+# Create a tree model
+treeModel <- train(classe ~ . , data=training, method="rpart")
+
+# Cross-validate the predictions against the test-set
+predictions <- predict(treeModel, newdata=testing)
+```
+
+```{r}
+confusionMatrix(predictions, testing$classe)
+```
+
+The confusionMatrix shows a very low accuracy. The model training has been untuned, and can probably perform much better.
+
+## Machine Learning Using a Boosted Tree
+
+A further attempt at learning the model can be done using a boosted tree. The below shows how this is done. The execution time turned out to very long. 
+
+```{r}
+inTrain <- createDataPartition(y=cleanedTrainSet$classe, p=0.8, list=FALSE)
+
+training <- cleanedTrainSet[inTrain,]
+testing <- cleanedTrainSet[-inTrain,]
+
+# Create a boosted tree model
+gbmModel <- train(classe ~ . , data=training, method="gbm", verbose = FALSE)
+
+# Cross-validate the predictions against the test-set
+predictions <- predict(gbmModel, newdata=testing)
+```
+
+```{r}
+confusionMatrix(predictions, testing$classe)
+```
+
+Results appear to be quite good, around 93%. The sensitivity and specificity is not that great though.
+
+## Test results, and Write result files
+
+As it turns out the Random Forest model as my first guess has proven to deliver very good results. Thus, in the below section we use the downloaded testSet file that does not contain the classe variable for our final predictions. Using this model we will predict the type of exercise that was used, and use that in the submission assignment.
+
+```{r}
+# Now test out the results against the testSet loaded from the website.
+predictionsTestSet <- predict(randomForestModel, newdata = testSet)
+```
+
+The below section writes the result files for the submission part of the assignment. Please use getwd() to locate the folder where these files are written.
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predictionsTestSet)
 ```
